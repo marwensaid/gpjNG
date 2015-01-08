@@ -31,5 +31,5 @@ sourceSets {
 
 task deployToSdk(type: Copy, dependsOn: build) {
     from "${buildDir}/libs/${project.name}.jar"
-    into '../java/IssuerSdkBundle/STBridge/libs/'
+    into '../java/IssuerSdkBundle/sdk-libs/'
 }
