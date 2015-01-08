@@ -2421,11 +2421,19 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     		CardTerminal terminal = null;
     		if(tf!=null)
     		{
-    			CardTerminals terminals = tf.terminals();
+    			List<CardTerminal> terminals = tf.terminals().list(CardTerminals.State.ALL);
 
-    			System.out.println("Found terminals: " + terminals.list());
-    			for (CardTerminal t : terminals
-    					.list(CardTerminals.State.ALL)) {
+                Iterator<CardTerminal> terminalIter = terminals.iterator();
+                System.out.print("Found terminals: [");
+                while (terminalIter.hasNext()) {
+                    System.out.print(terminalIter.next().getName());
+                    if (terminalIter.hasNext()) {
+                        System.out.print(", ");
+                    }
+                }
+                System.out.println("]");
+
+                for (CardTerminal t : terminals) {
     				terminal = t;
     				c = null;
     				try {
