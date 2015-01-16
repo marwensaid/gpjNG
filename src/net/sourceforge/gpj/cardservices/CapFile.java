@@ -26,6 +26,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.FileInputStream;
+import java.io.PrintWriter;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -42,25 +43,25 @@ public class CapFile {
             "Import", "Applet", "Class", "Method", "StaticField", "Export",
             "ConstantPool", "RefLocation", "Descriptor", "Debug" };
 
-    private HashMap<String, byte[]> capComponents = new HashMap<String, byte[]>();
+    private Map<String, byte[]> capComponents = new HashMap<>();
 
     private String packageName = null;
 
     private AID packageAID = null;
 
-    private List<AID> appletAIDs = new ArrayList<AID>();
+    private List<AID> appletAIDs = new ArrayList<>();
 
-    private List<byte[]> dapBlocks = new ArrayList<byte[]>();
+    private List<byte[]> dapBlocks = new ArrayList<>();
 
-    private List<byte[]> loadTokens = new ArrayList<byte[]>();
+    private List<byte[]> loadTokens = new ArrayList<>();
 
-    private List<byte[]> installTokens = new ArrayList<byte[]>();
+    private List<byte[]> installTokens = new ArrayList<>();
 
-    public CapFile(InputStream in) throws IOException {
-        this(in, null);
+    public CapFile(InputStream in, PrintWriter debugOut) throws IOException {
+        this(in, debugOut, null);
     }
 
-    public CapFile(InputStream in, String packageName) throws IOException {
+    public CapFile(InputStream in, PrintWriter debugOut, String packageName) throws IOException {
         ZipInputStream zip = new ZipInputStream(in);
         Map<String, byte[]> entries = getEntries(zip);
         if (packageName != null) {
@@ -76,16 +77,16 @@ public class CapFile {
                 }
             }
         }
-        GPUtil.debug("packagePath: " + packageName);
+        GPUtil.debug(debugOut, "packagePath: " + packageName);
         this.packageName = packageName.substring(0,
                 packageName.lastIndexOf("/javacard/")).replace('/', '.');
-        GPUtil.debug("package: " + this.packageName);
+        GPUtil.debug(debugOut, "package: " + this.packageName);
         for (String name : componentNames) {
             String fullName = packageName + name + ".cap";
             byte[] contents = entries.get(fullName);
             capComponents.put(name, contents);
         }
-        List<List<byte[]>> tables = new ArrayList<List<byte[]>>();
+        List<List<byte[]>> tables = new ArrayList<>();
         tables.add(dapBlocks);
         tables.add(loadTokens);
         tables.add(installTokens);
@@ -121,7 +122,7 @@ public class CapFile {
         // header[12] should be the length of AID
         int len = header[i++];
         packageAID = new AID(header, i, len);
-        GPUtil.debug("package AID: " + packageAID);
+        GPUtil.debug(debugOut, "package AID: " + packageAID);
 
         
         byte[] applet = capComponents.get("Applet");
@@ -140,14 +141,14 @@ public class CapFile {
               appletAIDs.add(new AID(applet, i, len));
               i += len + 2;
           }
-          GPUtil.debug("applet AIDs: " + appletAIDs);
+          GPUtil.debug(debugOut, "applet AIDs: " + appletAIDs);
         }else{
-            GPUtil.debug("No Applet component.");            
+            GPUtil.debug(debugOut, "No Applet component.");
         }
     }
 
     private Map<String,byte[]> getEntries(ZipInputStream in) throws IOException {
-        Map<String,byte[]> result = new HashMap<String, byte[]>();
+        Map<String,byte[]> result = new HashMap<>();
         while(true) {
             ZipEntry entry = in.getNextEntry();
             if(entry == null) {
@@ -171,15 +172,15 @@ public class CapFile {
     }
 
     public List<AID> getAppletAIDs() {
-        List<AID> result = new ArrayList<AID>();
+        List<AID> result = new ArrayList<>();
         result.addAll(appletAIDs);
         return result;
     }
 
-    public int getCodeLength(boolean includeDebug) {
+    public int getCodeLength(PrintWriter debugOut) {
         int result = 0;
         for (String name : componentNames) {
-            if (!includeDebug
+            if (!(debugOut == null)
                     && (name.equals("Debug") || name.equals("Descriptor")))
                 continue;
             byte[] data = capComponents.get(name);
@@ -190,8 +191,8 @@ public class CapFile {
         return result;
     }
 
-    private byte[] createHeader(boolean includeDebug) {
-        int len = getCodeLength(includeDebug);
+    private byte[] createHeader(PrintWriter debugOut) {
+        int len = getCodeLength(debugOut);
         ByteArrayOutputStream bo = new ByteArrayOutputStream();
         bo.write((byte) 0xC4);
         if (len < 0x80) {
@@ -212,22 +213,22 @@ public class CapFile {
         return bo.toByteArray();
     }
 
-    public List<byte[]> getLoadBlocks(boolean includeDebug,
+    public List<byte[]> getLoadBlocks(PrintWriter debugOut,
             boolean separateComponents, int blockSize) {
         List<byte[]> blocks = null;
 
         if (!separateComponents) {
             ByteArrayOutputStream bo = new ByteArrayOutputStream();
             try {
-                bo.write(createHeader(includeDebug));
-                bo.write(getRawCode(includeDebug));
+                bo.write(createHeader(debugOut));
+                bo.write(getRawCode(debugOut));
             } catch (IOException ioe) {
 
             }
             blocks = splitArray(bo.toByteArray(), blockSize);
         } else {
             for (String name : componentNames) {
-                if (!includeDebug
+                if (debugOut == null
                         && (name.equals("Debug") || name.equals("Descriptor")))
                     continue;
 
@@ -238,7 +239,7 @@ public class CapFile {
                 if (name.equals("Header")) {
                     ByteArrayOutputStream bo = new ByteArrayOutputStream();
                     try {
-                        bo.write(createHeader(includeDebug));
+                        bo.write(createHeader(debugOut));
                         bo.write(currentComponent);
                     } catch (IOException ioe) {
 
@@ -251,14 +252,14 @@ public class CapFile {
         return blocks;
     }
 
-    private byte[] getRawCode(boolean includeDebug) {
-        byte[] result = new byte[getCodeLength(includeDebug)];
+    private byte[] getRawCode(PrintWriter debugOut) {
+        byte[] result = new byte[getCodeLength(debugOut)];
         short offset = 0;
         for (String name : componentNames) {
-            if (!includeDebug
+            if (debugOut == null
                     && (name.equals("Debug") || name.equals("Descriptor")))
                 continue;
-            byte[] currentComponent = (byte[]) capComponents.get(name);
+            byte[] currentComponent = capComponents.get(name);
             if (currentComponent == null)
                 continue;
             System.arraycopy(currentComponent, 0, result, offset,
@@ -268,18 +269,18 @@ public class CapFile {
         return result;
     }
 
-    public byte[] getLoadFileDataHash(boolean includeDebug) {
+    public byte[] getLoadFileDataHash(PrintWriter debugOut) {
         try {
             return MessageDigest.getInstance("SHA1").digest(
-                    getRawCode(includeDebug));
+                    getRawCode(debugOut));
         } catch (NoSuchAlgorithmException e) {
-            GPUtil.debug("Not possible?");
+            GPUtil.debug(debugOut, "Not possible?");
             return null;
         }
     }
 
     private List<byte[]> splitArray(byte[] array, int blockSize) {
-        List<byte[]> result = new ArrayList<byte[]>();
+        List<byte[]> result = new ArrayList<>();
         int len = array.length;
         int offset = 0;
         int left = len - offset;
@@ -303,14 +304,14 @@ public class CapFile {
         String result = "";
         for (String name : componentNames) {
             result = result + name + ".cap:\n";
-            byte[] b = (byte[]) capComponents.get(name);
+            byte[] b = capComponents.get(name);
             if (b != null) {
                 result = result + GPUtil.byteArrayToString(b) + "\n";
             } else {
                 result = result + "(empty)\n";
             }
         }
-        List<List<byte[]>> tables = new ArrayList<List<byte[]>>();
+        List<List<byte[]>> tables = new ArrayList<>();
         tables.add(dapBlocks);
         tables.add(loadTokens);
         tables.add(installTokens);
@@ -327,6 +328,6 @@ public class CapFile {
     
     // Test
     public static void main(String[] args) throws IOException {
-      CapFile cp = new CapFile(new FileInputStream(args[0]));
+      new CapFile(new FileInputStream(args[0]), new PrintWriter(System.out, true));
     }
 }
