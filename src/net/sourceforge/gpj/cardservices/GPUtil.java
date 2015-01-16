@@ -25,13 +25,13 @@ package net.sourceforge.gpj.cardservices;
 import javax.smartcardio.CardException;
 import net.sourceforge.gpj.cardservices.ciphers.ICipher;
 
+import java.io.PrintWriter;
+
 public class GPUtil {
 
-    public static boolean debug = true;
-
-    public static void debug(Object o) {
-        if (debug) {
-            System.out.println(o.toString());
+    public static void debug(PrintWriter out, Object o) {
+        if (out != null) {
+            out.println(o.toString());
         }
     }
 
@@ -205,8 +205,7 @@ public class GPUtil {
             System.arraycopy(temp, temp.length - 8, result, 0, 8);
             return result;
         } catch (Exception e) {
-            e.printStackTrace();
-            throw new CardException("MAC computation failed.");
+            throw new CardException("MAC computation failed", e);
         }
     }
 

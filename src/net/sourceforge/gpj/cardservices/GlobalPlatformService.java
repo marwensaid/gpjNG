@@ -29,6 +29,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.security.NoSuchAlgorithmException;
@@ -116,8 +117,6 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 
     public static final byte GET_STATUS = (byte) 0xF2;
 
-    protected AID sdAID = null;
-
     public static final byte[] defaultEncKey = { 0x40, 0x41, 0x42, 0x43, 0x44,
             0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F };
 
@@ -127,13 +126,17 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     public static final byte[] defaultKekKey = { 0x40, 0x41, 0x42, 0x43, 0x44,
             0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F };
 
-    public static Map<String, byte[]> SPECIAL_MOTHER_KEYS = new TreeMap<String, byte[]>();
+    public static Map<String, byte[]> SPECIAL_MOTHER_KEYS = new HashMap<>();
 
     static {
     	SPECIAL_MOTHER_KEYS.put(AID.GEMALTO, new byte[] {0x47, 0x45, 0x4D, 0x58, 0x50, 0x52, 0x45, 0x53, 0x53, 0x4F, 0x53, 0x41, 0x4D, 0x50, 0x4C, 0x45});
     }
 
-    public static final int defaultLoadSize = 255;
+    public static final int DEFAULT_LOAD_SIZE = 255;
+
+    protected AID sdAID = null;
+
+    protected PrintWriter debugOut = null;
 
     protected SecureChannelWrapper wrapper = null;
 
@@ -141,14 +144,13 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 
     protected int scpVersion = SCP_ANY;
 
-    private HashMap<Integer, KeySet> keys = new HashMap<Integer, KeySet>();
+    private HashMap<Integer, KeySet> keys = new HashMap<>();
 
-    private ArrayList<APDUListener> apduListeners = new ArrayList<APDUListener>();
+    private ArrayList<APDUListener> apduListeners = new ArrayList<>();
     
     private String path = "";
 
-    @SuppressWarnings("rawtypes")
-	private HashMap helpMap;
+	private Map<String, String> helpMap;
 
     /**
      * Set the security domain AID, the channel and use scpAny.
@@ -160,9 +162,9 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      * @throws IllegalArgumentException
      *             if {@code channel} is null.
      */
-    public GlobalPlatformService(AID aid, CardChannel channel)
+    public GlobalPlatformService(AID aid, CardChannel channel, PrintWriter debugOut)
             throws IllegalArgumentException {
-        this(aid, channel, SCP_ANY);
+        this(aid, channel, SCP_ANY, debugOut);
     }
 
     /**
@@ -174,13 +176,17 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      * @param channel
      *            channel to talk to
      * @param scpVersion
+     *
+     * @param debugOut
+     *            where you want debug output, or null if you don't want it
+     *
      * @throws IllegalArgumentException
      *             if {@code scpVersion} is out of range or {@code channel} is
      *             null.
      */
-    public GlobalPlatformService(AID aid, CardChannel channel, int scpVersion)
+    public GlobalPlatformService(AID aid, CardChannel channel, int scpVersion, PrintWriter debugOut)
             throws IllegalArgumentException {
-        this(channel, scpVersion);
+        this(channel, scpVersion, debugOut);
         this.sdAID = aid;
     }
 
@@ -189,12 +195,16 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      * 
      * @param channel
      *            channel to talk to
+     *
+     * @param debugOut
+     *            where you want debug output, or null if you don't want it
+     *
      * @throws IllegalArgumentException
      *             if {@code channel} is null.
      */
-    public GlobalPlatformService(CardChannel channel)
+    public GlobalPlatformService(CardChannel channel, PrintWriter debugOut)
             throws IllegalArgumentException {
-        this(channel, SCP_ANY);
+        this(channel, SCP_ANY, debugOut);
     }
 
     /**
@@ -208,7 +218,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      *             if {@code scpVersion} is out of range or {@code channel} is
      *             null.
      */
-    public GlobalPlatformService(CardChannel channel, int scpVersion)
+    public GlobalPlatformService(CardChannel channel, int scpVersion, PrintWriter debugOut)
             throws IllegalArgumentException {
         if (scpVersion != SCP_ANY && scpVersion != SCP_02_0A
                 && scpVersion != SCP_02_0B && scpVersion != SCP_02_1A
@@ -221,6 +231,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
         }
         this.channel = channel;
         this.scpVersion = scpVersion;
+        this.debugOut = debugOut;
         putHelpMap();
     }
 
@@ -235,18 +246,13 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     public void notifyExchangedAPDU(CommandAPDU c, ResponseAPDU r, int ms) {
         for (APDUListener l : apduListeners) {
             l.exchangedAPDU(c, r);
-            GPUtil
-    				.debug("("+ms+" ms)");
+            GPUtil.debug(debugOut, "("+ms+" ms)");
         }
     }
 
     public void exchangedAPDU(CommandAPDU c, ResponseAPDU r) {
-        GPUtil
-                .debug("Command  APDU: "
-                        + GPUtil.byteArrayToString(c.getBytes()));
-        GPUtil
-                .debug("Response APDU: "
-                        + GPUtil.byteArrayToString(r.getBytes()));
+        GPUtil.debug(debugOut, "Command  APDU: " + GPUtil.byteArrayToString(c.getBytes()));
+        GPUtil.debug(debugOut, "Response APDU: " + GPUtil.byteArrayToString(r.getBytes()));
     }
 
     /**
@@ -259,7 +265,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      * @throws CardException
      *             on data transmission errors
      */
-    public void open() throws GPSecurityDomainSelectionException, CardException {
+    public void open(PrintWriter out) throws GPSecurityDomainSelectionException, CardException {
     	
     	if (sdAID == null) {
     		// Try known SD AIDs
@@ -273,11 +279,11 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
                 sw = (short) resp.getSW();
                 if (sw == SW_NO_ERROR) {
                 	sdAID = entry.getValue();
-                    System.out.println("Successfully selected Security Domain "+entry.getKey()+" "+
+                    out.println("Successfully selected Security Domain "+entry.getKey()+" "+
                             entry.getValue().toString());
                 	break;
                 }
-                System.out.println("Failed to select Security Domain "+entry.getKey()+" "+
+                out.println("Failed to select Security Domain "+entry.getKey()+" "+
                   entry.getValue().toString()+", SW: "+GPUtil.swToString(sw));
     		}
     		if(sdAID == null) {
@@ -302,8 +308,8 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 
     /**
      * Establishes a secure channel to the security domain. The security domain
-     * must have been selected with {@link open open} before. The {@code keySet}
-     * must have been initialized with {@link setKeys setKeys} before.
+     * must have been selected with open before. The {@code keySet}
+     * must have been initialized with setKeys before.
      * 
      * @throws IllegalArgumentException
      *             if the arguments are out of range or the keyset is undefined
@@ -468,8 +474,8 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      *             when communication problems with the card or the selected
      *             security domain arise.
      */
-    public void openWithDefaultKeys() throws CardException {
-        open();
+    public void openWithDefaultKeys(PrintWriter out) throws CardException {
+        open(out);
         int keySet = 0;
         setKeys(keySet, defaultEncKey, defaultMacKey, defaultKekKey);
         openSecureChannel(keySet, 0, SCP_ANY, APDU_MAC, false);
@@ -648,12 +654,13 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     /**
      * 
      * Convenience method, opens {@code fileName} and calls then
-     * {@link #loadCapFile(CapFile, boolean, boolean, int, boolean, boolean)}
+     * {@link #loadCapFile(CapFile, PrintWriter, boolean, int, boolean, boolean)}
      * with otherwise unmodified parameters.
      * 
-     * @param fileName
-     *            file name of the applet cap file
-     * @param includeDebug
+     * @param url
+     *             url of the applet cap file
+     * @param debugOut
+     *             null if you don't want debug output, otherwise where debug out will be sent
      * @param separateComponents
      * @param blockSize
      * @param loadParam
@@ -669,13 +676,12 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      * @throws IOException
      *             if opening {@code fileName} fails
      */
-    public void loadCapFile(URL url, boolean includeDebug,
+    public void loadCapFile(URL url, PrintWriter debugOut,
             boolean separateComponents, int blockSize, boolean loadParam,
             boolean useHash) throws IOException, GPInstallForLoadException,
             GPLoadException, CardException {
-        CapFile cap = null;
-        cap = new CapFile(url.openStream(), null);
-        loadCapFile(cap, includeDebug, separateComponents, blockSize,
+        CapFile cap = new CapFile(url.openStream(), null);
+        loadCapFile(cap, debugOut, separateComponents, blockSize,
                 loadParam, useHash);
     }
 
@@ -684,7 +690,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      * 
      * 
      * @param cap
-     * @param includeDebug
+     * @param debugOut
      * @param separateComponents
      * @param blockSize
      * @param loadParam
@@ -698,14 +704,14 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      * @throws CardException
      *             for low-level communication problems
      */
-    public void loadCapFile(CapFile cap, boolean includeDebug,
+    public void loadCapFile(CapFile cap, PrintWriter debugOut,
             boolean separateComponents, int blockSize, boolean loadParam,
             boolean useHash) throws GPInstallForLoadException, GPLoadException,
             CardException {
 
-        byte[] hash = useHash ? cap.getLoadFileDataHash(includeDebug)
+        byte[] hash = useHash ? cap.getLoadFileDataHash(debugOut)
                 : new byte[0];
-        int len = cap.getCodeLength(includeDebug);
+        int len = cap.getCodeLength(debugOut);
         byte[] loadParams = loadParam ? new byte[] { (byte) 0xEF, 0x04,
                 (byte) 0xC6, 0x02, (byte) ((len & 0xFF00) >> 8),
                 (byte) (len & 0xFF) } : new byte[0];
@@ -736,8 +742,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
             throw new GPInstallForLoadException(sw,
                     "Install for Load failed, SW: " + GPUtil.swToString(sw));
         }
-        List<byte[]> blocks = cap.getLoadBlocks(includeDebug,
-                separateComponents, blockSize);
+        List<byte[]> blocks = cap.getLoadBlocks(debugOut, separateComponents, blockSize);
         for (int i = 0; i < blocks.size(); i++) {
             CommandAPDU load = new CommandAPDU(CLA_GP, LOAD, (i == blocks
                     .size() - 1) ? 0x80 : 0x00, (byte) i, blocks.get(i));
@@ -785,7 +790,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      * @throws NullPointerException
      *             if either packageAID or appletAID is null
      */
-    public void installAndMakeSelecatable(AID packageAID, AID appletAID,
+    public void installAndMakeSelectable(AID packageAID, AID appletAID,
             AID instanceAID, byte privileges, byte[] installParams,
             byte[] installToken) throws GPMakeSelectableException,
             CardException {
@@ -1363,7 +1368,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 
     private static final String jcopProviderName = "ds.javacard.emulator.jcop.DS_provider";
 
-    public static void loadJCOPProvider() throws InstantiationException,
+    public static void loadJCOPProvider(PrintWriter out) throws InstantiationException,
             ClassNotFoundException, IllegalAccessException,
             NoSuchAlgorithmException {
         Class<?> jcopProvider = Class.forName(jcopProviderName);
@@ -1371,72 +1376,44 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
         // Peek that provider to provoke ClassNotFoundException
         // from a missing offcard.jar.
         TerminalFactory.getInstance("JcopEmulator", null);
-        System.out.println("Provider for jcop emulator comptibility loaded.");
+        out.println("Provider for jcop emulator comptibility loaded.");
     }
 
-    public boolean runScript(String script)
-    {
-    	BufferedReader br;
-		try {
-			br = new BufferedReader(new FileReader(script));
-		} catch (FileNotFoundException e) {
-			return false;
-		}
-		String line = null;
-		while(true)
-		{
-			line="";
-			int ch = 0;
-			try {
-				while ((ch = br.read()) > -1 && ((char)ch)!='\n' && ((char)ch)!='\r') {
-					if((char)ch==' ' && line.equals(""))
-						continue;
-					line+=(char)ch;
-				}
-			} catch (IOException e1) {
-				try {
-					br.close();
-				} catch (IOException e) {
-					return true;
-				}
-				return true;
-			}
-			if(((char)ch)=='\r')
-				try {
-					if(br.readLine()==null)
-						break;
-				} catch (IOException e) {
-					try {
-						br.close();
-					} catch (IOException e1) {
-						return true;
-					}
-					return true;
-				}
-			
-			if (line.isEmpty() || line.trim().equals("") || line.startsWith("#"))
-			{
-				if(ch==-1)
-					break;
-				continue;
-			}
-			
-			this.commandLine(line);
-			if(ch==-1)
-				break;
-		}
-		try {
-			br.close();
-		} catch (IOException e) {
-			return true;
-		}
-    	return true;
+    public boolean runScript(BufferedReader in, PrintWriter out, boolean isInteractive) {
+
+        while (true) {
+
+            if (isInteractive) {
+                out.print(">");
+                out.flush(); // no newline so need to flush
+            }
+
+            try {
+                String line = in.readLine();
+                if (line == null)
+                    break;
+
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#"))
+                    continue;
+
+                if (line.toLowerCase().equals("exit"))
+                    break;
+
+                commandLine(line, out);
+
+            } catch (IOException e) {
+                out.println("Error reading input: " + e.getMessage());
+                return false;
+            }
+        }
+
+        return true;
     }
-    
-    @SuppressWarnings("unchecked")
+
 	public void putHelpMap()
     {
-    	helpMap = new HashMap<String,String>();
+    	helpMap = new HashMap<>();
     	helpMap.put("help","this");
     	helpMap.put("/set-var","/set-var <path \"script\">  set a shell variable");
     	helpMap.put("delete","delete [-r|--delete-related] <aid> delete an aid");
@@ -1451,25 +1428,24 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     	helpMap.put("/atr","/atr   reset the card");
     	helpMap.put("set-key","set-key key-set/key-id(1|2|3)/key-type(DES|DES-ECB|DES-CBC)/key-value(16 byte double length key) set a key in the shell ");
     	helpMap.put("put-key","put-key -m|--mode add|replace [-r|--replace-keySet key-set] key-set/key-id(1|2|3)/key-type(DES|DES-ECB|DES-CBC)/key-value(16 byte double length key) set a key in the shell ");
-       }
+    }
     
-    public void printAllHelp()
+    public void printAllHelp(PrintWriter out)
     {
-    	@SuppressWarnings("unchecked")
 		Set<String> keys = helpMap.keySet();
     	Iterator<String> i = keys.iterator();
     	while ( i.hasNext() ){
-    		System.out.println(i.next());
+    		out.println(i.next());
     	}
     }
     
-    void printHelp(String cmd)
+    void printHelp(String cmd, PrintWriter out)
     {
     	if(helpMap.get(cmd)!=null)
-    		System.out.println(helpMap.get(cmd));
+    		out.println(helpMap.get(cmd));
     }
     
-    public void commandLine(String cmd)
+    public void commandLine(String cmd, PrintWriter out)
     {
     	String cmdLine[] = cmd.split("\\s+");
     	AID instanceAid = null;
@@ -1483,43 +1459,43 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     		case "put-key":
     			if(wrapper==null)
     			{
-					System.out.println("command not supported");
+					out.println("command not supported");
 					return;
     			}
     			if(cmdLine.length>3)
     			{
 					if(!cmdLine[1].equals("-m") && !cmdLine[1].equals("--mode"))
 					{
-						System.out.println("invalid parameter");
+						out.println("invalid parameter");
 						return;
 					}
 					if(!cmdLine[2].equals("add") && !cmdLine[2].equals("replace"))
 					{
-						System.out.println("invalid parameter");
+						out.println("invalid parameter");
 						return;
 					}
 					short index = 3;
 					if(cmdLine[2].equals("replace") && !cmdLine[3].equals("-r") && !cmdLine[3].equals("--replace-keySet"))
 					{
-						System.out.println("invalid parameter");
+						out.println("invalid parameter");
 						return;
 					}
 					else if(cmdLine[2].equals("replace"))
 					{
 						if(cmdLine.length<6)
 						{
-							System.out.println("invalid parameter");
+							out.println("invalid parameter");
 							return;
 						}
 						index+=2;
 						try {
 							if(Integer.parseInt(cmdLine[4])<1 || Integer.parseInt(cmdLine[4])>127)
 							{
-								System.out.println("invalid parameter");
+								out.println("invalid parameter");
 								return;
 							}
 						} catch(NumberFormatException e) {
-							System.out.println("invalid format");
+							out.println("invalid format");
 							return;
 						}
 					}
@@ -1531,22 +1507,22 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					keyParts[i-index] = cmdLine[i].split("[.,\\|;:/]");
     					if(keyParts[i-index]==null || keyParts[i-index].length!=4)
     					{
-    						System.out.println("command not supported");
+    						out.println("command not supported");
     						return;
     					}
     					try{
     						if(Integer.parseInt(keyParts[i-index][0])<=0 || Integer.parseInt(keyParts[i-index][0])>127)
     						{
-        						System.out.println("invalid key set number");
+        						out.println("invalid key set number");
         						return;
     						}
     						if(Integer.parseInt(keyParts[i-index][1])<1 || Integer.parseInt(keyParts[i-index][1])>3)
     						{
-        						System.out.println("invalid key id");
+        						out.println("invalid key id");
         						return;
     						}
     					} catch(NumberFormatException e) {
-    						System.out.println("invalid format");
+    						out.println("invalid format");
     						return;
     					}
     					switch(keyParts[i-index][2])
@@ -1555,12 +1531,12 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					case "DES":
         						break;
     					default:
-    						System.out.println("invalid encryption alg");
+    						out.println("invalid encryption alg");
     						return;
     					}
     					if(GPUtil.stringToByteArray(keyParts[i-index][3]).length!=16)
     					{
-    						System.out.println("invalid key");
+    						out.println("invalid key");
     						return;
     					}
     				}
@@ -1575,7 +1551,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     				byte[] data = new byte[0x16*keyParts.length+1];
     				if((byte)Integer.parseInt(keyParts[0][0])==0)
 					{
-						System.out.println("invalid key data");
+						out.println("invalid key data");
 						return;
 					}
     				data[0] = (byte)Integer.parseInt(keyParts[0][0]);
@@ -1585,12 +1561,12 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     				{
     					if(keyId!= Integer.parseInt(keyParts[i][1]))
     					{
-    						System.out.println("invalid key data");
+    						out.println("invalid key data");
     						return;
     					}
     					else if(data[0] != (byte)Integer.parseInt(keyParts[i][0]))
     					{
-    						System.out.println("invalid key data");
+    						out.println("invalid key data");
     						return;
     					}
     					keyId++;
@@ -1604,13 +1580,13 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 							keyCheck[1] = ch[1];
 							keyCheck[2] = ch[2];
 						} catch (CardException e1) {
-							System.out.println("invalid key data");
+							out.println("invalid key data");
 							return;
 						}
     					try {
 							key = GPUtil.ecb3des(wrapper.sessionKeys.keys[2], key, 0, 0x10);
 						} catch (CardException e) {
-    						System.out.println("invalid key data");
+    						out.println("invalid key data");
     						return;
 						}
     					System.arraycopy(key, 0, data, 1 + i*0x16+2, 0x10);
@@ -1620,13 +1596,13 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     				try {
 						this.transmit(new CommandAPDU(0x80,0xD8,P1,P2,data,0x00));
 					} catch (IllegalStateException e) {
-						System.out.println("command not supported");
+						out.println("command not supported");
 		    		} catch (CardException e) {
-		    			System.out.println("command not supported");
+		    			out.println("command not supported");
 		        	}
     			}
     			else
-    				System.out.println("command not supported");
+    				out.println("command not supported");
     			break;
     		case "set-key":
     			if(cmdLine.length>1)
@@ -1637,22 +1613,22 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					keyParts[i-1] = cmdLine[i].split("[.,\\|;:/]");
     					if(keyParts[i-1]==null || keyParts[i-1].length!=4)
     					{
-    						System.out.println("command not supported");
+    						out.println("command not supported");
     						return;
     					}
     					try{
     						if(Integer.parseInt(keyParts[i-1][0])<=0 || Integer.parseInt(keyParts[i-1][0])>127)
     						{
-        						System.out.println("invalid key set number");
+        						out.println("invalid key set number");
         						return;
     						}
     						if(Integer.parseInt(keyParts[i-1][1])<1 || Integer.parseInt(keyParts[i-1][1])>3)
     						{
-        						System.out.println("invalid key id");
+        						out.println("invalid key id");
         						return;
     						}
     					} catch(NumberFormatException e) {
-    						System.out.println("invalid format");
+    						out.println("invalid format");
     						return;
     					}
     					switch(keyParts[i-1][2])
@@ -1662,12 +1638,12 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					case "DES-CBC":
         					break;
     					default:
-    						System.out.println("invalid encryption alg");
+    						out.println("invalid encryption alg");
     						return;
     					}
     					if(GPUtil.stringToByteArray(keyParts[i-1][3]).length!=16)
     					{
-    						System.out.println("invalid key");
+    						out.println("invalid key");
     						return;
     					}
     				}
@@ -1678,13 +1654,13 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     				}
     			}
     			else
-    				System.out.println("command not supported");
+    				out.println("command not supported");
     			break;
     		case "help":
     			if(cmdLine.length>1)
-    				printHelp(cmdLine[1]);
+    				printHelp(cmdLine[1], out);
     			else
-    				printAllHelp();
+    				printAllHelp(out);
     			break;
         	case "/set-var":
     			if(cmdLine.length>1)
@@ -1701,11 +1677,11 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
         				if(m.matches())
         					path = m.group(1);
         				else
-        					System.out.println("command not supported");
+        					out.println("command not supported");
     				}
     			}
     			else
-    				System.out.println("command not supported");
+    				out.println("command not supported");
     			break;
     		case "delete":
     			if(cmdLine.length>1 && cmdLine.length<4)
@@ -1721,7 +1697,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					}
     				}
  
-    				byte[] aid = null;
+    				byte[] aid;
 					if((cmdLine[i].startsWith("|")))
 						aid = GPUtil.readableStringToByteArray(cmdLine[i]);
 					else
@@ -1729,9 +1705,9 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 		   			try {
 						this.deleteAID(new AID(aid), deps);
 					} catch (GPDeleteException e) {
-						System.out.println("command not supported");
+						out.println("command not supported");
 					} catch (CardException e) {
-						System.out.println("command not supported");
+						out.println("command not supported");
 					}
     			}
     			break;
@@ -1743,7 +1719,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     				{
     					if(!cmdLine[1].equals("-i") && !cmdLine[1].equals("--instance-aid"))
     					{
-    						System.out.println("command not supported");
+    						out.println("command not supported");
     						return;
     					}
     				}
@@ -1760,7 +1736,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 						i++;
 					}
 					else
-						System.out.println("command not supported");
+						out.println("command not supported");
     				while(i<cmdLine.length)
     				{
 	    				switch(cmdLine[i])
@@ -1806,7 +1782,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 	    							appletAid = new AID(aid);
 	    						else
 	    						{
-	    							System.out.println("command not supported");
+	    							out.println("command not supported");
 	    							return;
 	    						}
 	    					}
@@ -1817,24 +1793,24 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     			}
     			else
     			{
-    				System.out.println("command not supported");
+    				out.println("command not supported");
     				return;
     			}
     			if(packageAid==null || appletAid==null)
     			{
-    				System.out.println("command not supported");
+    				out.println("command not supported");
     				return;
     			}
     			
     			try {
-					this.installAndMakeSelecatable(
-							packageAid, appletAid,
-							instanceAid, (byte) 0,
-							params, null);
+					this.installAndMakeSelectable(
+                            packageAid, appletAid,
+                            instanceAid, (byte) 0,
+                            params, null);
 				} catch (GPMakeSelectableException e3) {
-    				System.out.println("command not supported");
+    				out.println("command not supported");
 				} catch (CardException e3) {
-    				System.out.println("command not supported");
+    				out.println("command not supported");
 				}
 
     			break;
@@ -1862,7 +1838,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 	    						mode = mode|APDU_RMAC;
 	    						break;
 	    					default:
-	    	    				System.out.println("command not supported");
+	    	    				out.println("command not supported");
 	    	    				return;
 	    					}
     					}
@@ -1873,7 +1849,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					try {
     						keySet = Integer.parseInt(cmdLine[2]);
     					} catch (NumberFormatException e) {
-    	    				System.out.println("command not supported");
+    	    				out.println("command not supported");
     	    				return;
     					}
     				}
@@ -1882,13 +1858,13 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 								GlobalPlatformService.SCP_ANY,
 								mode, false);
 					} catch (IllegalArgumentException e) {
-	    				System.out.println("invalid arguments");
+	    				out.println("invalid arguments");
 					} catch (CardException e) {
-	    				System.out.println("command not supported");
+	    				out.println("command not supported");
 					}
     			}
     			else
-    				System.out.println("command not supported");
+    				out.println("command not supported");
     			break;
     		case "/select":
     			if(cmdLine.length==2 && !cmdLine[1].equals(""))
@@ -1908,14 +1884,14 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					r = channel.transmit(c);
     					notifyExchangedAPDU(c, r, (int)(System.currentTimeMillis()-t));
     			    } catch (IllegalStateException e) {
-						System.out.println("data format not supported");
+						out.println("data format not supported");
 					} catch (CardException e) {
-						System.out.println("data format not supported");
+						out.println("data format not supported");
 					}
 	    			wrapper = null;
         		}
     			else
-    				System.out.println("command not supported");
+    				out.println("command not supported");
     			break;
     		case "select":
     			if(cmdLine.length==2 && !cmdLine[1].equals(""))
@@ -1932,14 +1908,14 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					c = new CommandAPDU(tmp);
     					this.transmit(c);
 					} catch (IllegalStateException e) {
-						System.out.println("data format not supported");
+						out.println("data format not supported");
 					} catch (CardException e) {
-						System.out.println("data format not supported");
+						out.println("data format not supported");
 					}
     				wrapper = null;
         		}
     			else
-    				System.out.println("command not supported");
+    				out.println("command not supported");
     			break;
     		case "/send":
     			if(cmdLine.length==2 && !cmdLine[1].equals(""))
@@ -1968,11 +1944,11 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 	    				ResponseAPDU r = channel.transmit(c);
 						notifyExchangedAPDU(c, r, (int)(System.currentTimeMillis()-t));
 			    	} catch (CardException e2) {
-			    		System.out.println("data format not supported");
+			    		out.println("data format not supported");
 					}
     			}
     			else
-    				System.out.println("command not supported");
+    				out.println("command not supported");
     			break;
     		case "send":
     			if(cmdLine.length==2 && !cmdLine[1].equals(""))
@@ -1997,7 +1973,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     								enc="";
     								if(d==null || (d.length%8)!=0 || (!wrapper.sessionKeys.type.equals("DES_ECB") && !wrapper.sessionKeys.type.equals("DES")))
     		    					{
-    		    						System.out.println("data format not supported");
+    		    						out.println("data format not supported");
     		    						return;
     		    					}
     								//encrypt the data now
@@ -2005,7 +1981,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 										d = GPUtil.ecb3des(wrapper.sessionKeys.keys[2], d, 0, d.length);
 										newData+=GPUtil.byteArrayToString(d);
 		    		    			} catch (CardException e) {
-		    		    				System.out.println("data format not supported");
+		    		    				out.println("data format not supported");
 		        						return;
 		        					}
     							}
@@ -2019,7 +1995,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					}
     					if(encOn==true)
     					{
-    						System.out.println("data format not supported");
+    						out.println("data format not supported");
     						return;
     					}
 						cmdLine[1] = newData;
@@ -2029,154 +2005,150 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     				try {
     					this.transmit(c);
 					} catch (IllegalStateException e) {
-						System.out.println("data format not supported");
+						out.println("data format not supported");
 					} catch (CardException e) {
-						System.out.println("data format not supported");
+						out.println("data format not supported");
 					}
         		}
     			else
-    				System.out.println("command not supported");
+    				out.println("command not supported");
     			break;
     		case "/card":
     			try {
     				this.channel.getCard().transmitControlCommand(0, null);
-    				System.out.println("ATR: "
+    				out.println("ATR: "
     						+ GPUtil.byteArrayToString(this.channel.getCard().getATR().getBytes()));
     				wrapper = null;
-    				this.open();
+    				this.open(out);
     			} catch (GPSecurityDomainSelectionException e1) {
-    	   			System.out.println("command not supported");
+    	   			out.println("command not supported");
     			} catch (CardException e1) {
-    	   			System.out.println("command not supported");
+    	   			out.println("command not supported");
     			}
     			break;
     		case "/atr":
     			try {
     				this.channel.getCard().transmitControlCommand(0, null);
-    				System.out.println("ATR: "
+    				out.println("ATR: "
     						+ GPUtil.byteArrayToString(this.channel.getCard().getATR().getBytes()));
     				wrapper = null;
     			} catch (CardException e) {
-    	   			System.out.println("command not supported");
+    	   			out.println("command not supported");
     			}
-    			break;
-    		case "exit":
-    			System.exit(0);
     			break;
     		default:
     			if(path!=null && !path.equals(""))
     			{
     				if(cmdLine[0]!=null && cmdLine[0].length()>0)
     				{
-    					if(!runScript(path+cmdLine[0]+".jcsh"))
-    						System.out.println("command not supported");
+                        String scriptFilename = path+cmdLine[0]+".jcsh";
+                        try (BufferedReader scriptIn = new BufferedReader(new FileReader(scriptFilename))) {
+                            if(!runScript(scriptIn, out, false))
+                                out.println("command not supported");
+                        } catch (FileNotFoundException e) {
+                            out.println("command not supported");
+                        } catch (IOException e) {
+                            out.println("input error: " + e.getMessage());
+                        }
     				}
     				else
-        				System.out.println("command not supported");
+        				out.println("command not supported");
     			}
     			else
-    				System.out.println("command not supported");
+    				out.println("command not supported");
     			break;
     		}
     	}
     }
-    
-    public static void usage() {
-        System.out.println("Usage:");
-        System.out
-                .println("  java cardservices.GlobalPlatformService <options>");
-        System.out.println("");
-        System.out.println("Options:\n");
-        System.out
-                .println(" -sdaid <aid>      Security Domain AID, default a000000003000000");
-        System.out.println(" -keyset <num>     use key set <num>, default 0");
-        System.out.println(" -mode <apduMode>  use APDU mode, CLR, MAC, or ENC, default CLR");
-        System.out
-                .println(" -enc <key>        define ENC key, default: 40..4F");
-        System.out
-                .println(" -mac <key>        define MAC key, default: 40..4F");
-        System.out
-                .println(" -kek <key>        define KEK key, default: 40..4F");
-        System.out
-                .println(" -"+AID.GEMALTO+" use special VISA2 key diversification for GemaltoXpressPro cards");
-        System.out
-                .println("                   uses predifined Gemalto mother key if not stated otherwise");
-        System.out
-                .println("                   with -enc/-mac/-kek AFTER this option");
-        System.out
-                .println(" -visa2            use VISA2 key diversification (only key set 0), default off");
-        System.out
-                .println(" -emv              use EMV key diversification (only key set 0), default off");
-        System.out
-                .println(" -deletedeps       also delete depending packages/applets, default off");
-        System.out.println(" -delete <aid>     delete package/applet");
-        System.out.println(" -load <cap>       load <cap> file to the card, <cap> can be file name or URL");
-        System.out.println(" -loadsize <num>   load block size, default "
-                + defaultLoadSize);
-        System.out
-                .println(" -loadsep          load CAP components separately, default off");
-        System.out
-                .println(" -loaddebug        load the Debug & Descriptor component, default off");
-        System.out
-                .println(" -loadparam        set install for load code size parameter");
-        System.out
-                .println("                      (e.g. for CyberFlex cards), default off");
-        System.out.println(" -loadhash         check code hash during loading");
-        System.out.println(" -install          install applet:");
-        System.out
-                .println("   -applet <aid>   applet AID, default: take all AIDs from the CAP file");
-        System.out
-                .println("   -package <aid>  package AID, default: take from the CAP file");
-        System.out.println("   -priv <num>     privileges, default 0");
-        System.out
-                .println("   -param <bytes>  install parameters, default: C900");
-        System.out.println(" -list             list card registry");
-        System.out
-                .println(" -jcop             connect to the jcop emulator on port 8015");
-        System.out.println(" -h|-help|--help   print this usage info");
-        System.out.println(" -t [Remote|]localhost:3000   connect to a socket terminal");
-        System.out.println(" -cmd   block on command line");
-        System.out.println(" -s   <script/to/run.jcsh>  run a script");
-        System.out.println("");
-        System.out
-                .println("Multiple -load/-install/-delete and -list take the following precedence:");
-        System.out.println("  delete(s), load, install(s), list\n");
-        System.out
-                .println("All -load/-install/-delete/-list actions will be performed on\n"
-                        + "the basic logical channel of all cards currently connected.\n"
-                        + "By default all connected PC/SC terminals are searched.\n\n"
-                        + "Option -jcop requires jcopio.jar and offcard.jar on the class path.\n");
-        System.out
-                .println("<aid> can be of the byte form 0A00000003... or the string form \"|applet.app|\"\n");
-        System.out.println("Examples:\n");
-        System.out.println(" [prog] -list");
-        System.out.println(" [prog] -load applet.cap -install -list ");
-        System.out
-                .println(" [prog] -deletedeps -delete 360000000001 -load applet.cap -install -list");
-        System.out
-                .println(" [prog] -emv -keyset 0 -enc 404142434445464748494A4B4C4D4E4F -list");
-        System.out.println("");
+
+    public static void usage(PrintWriter out) {
+        out.println("Usage:");
+        out.println("  java cardservices.GlobalPlatformService <options>");
+        out.println("");
+        out.println("Options:\n");
+        out.println(" -sdaid <aid>      Security Domain AID, default a000000003000000");
+        out.println(" -keyset <num>     use key set <num>, default 0");
+        out.println(" -mode <apduMode>  use APDU mode, CLR, MAC, or ENC, default CLR");
+        out.println(" -enc <key>        define ENC key, default: 40..4F");
+        out.println(" -mac <key>        define MAC key, default: 40..4F");
+        out.println(" -kek <key>        define KEK key, default: 40..4F");
+        out.println(" -" + AID.GEMALTO + " use special VISA2 key diversification for GemaltoXpressPro cards");
+        out.println("                   uses predifined Gemalto mother key if not stated otherwise");
+        out.println("                   with -enc/-mac/-kek AFTER this option");
+        out.println(" -visa2            use VISA2 key diversification (only key set 0), default off");
+        out.println(" -emv              use EMV key diversification (only key set 0), default off");
+        out.println(" -deletedeps       also delete depending packages/applets, default off");
+        out.println(" -delete <aid>     delete package/applet");
+        out.println(" -load <cap>       load <cap> file to the card, <cap> can be file name or URL");
+        out.println(" -loadsize <num>   load block size, default " + DEFAULT_LOAD_SIZE);
+        out.println(" -loadsep          load CAP components separately, default off");
+        out.println(" -loaddebug        load the Debug & Descriptor component, default off");
+        out.println(" -loadparam        set install for load code size parameter");
+        out.println("                      (e.g. for CyberFlex cards), default off");
+        out.println(" -loadhash         check code hash during loading");
+        out.println(" -install          install applet:");
+        out.println("   -applet <aid>   applet AID, default: take all AIDs from the CAP file");
+        out.println("   -package <aid>  package AID, default: take from the CAP file");
+        out.println("   -priv <num>     privileges, default 0");
+        out.println("   -param <bytes>  install parameters, default: C900");
+        out.println(" -list             list card registry");
+        out.println(" -jcop             connect to the jcop emulator on port 8015");
+        out.println(" -h|-help|--help   print this usage info");
+        out.println(" -t [Remote|]localhost:3000   connect to a socket terminal");
+        out.println(" -cmd   block on command line");
+        out.println(" -s   <script/to/run.jcsh>  run a script");
+        out.println("");
+        out.println("Multiple -load/-install/-delete and -list take the following precedence:");
+        out.println("  delete(s), load, install(s), list\n");
+        out.println("All -load/-install/-delete/-list actions will be performed on\n"
+                + "the basic logical channel of all cards currently connected.\n"
+                + "By default all connected PC/SC terminals are searched.\n\n"
+                + "Option -jcop requires jcopio.jar and offcard.jar on the class path.\n");
+        out.println("<aid> can be of the byte form 0A00000003... or the string form \"|applet.app|\"\n");
+        out.println("Examples:\n");
+        out.println(" [prog] -list");
+        out.println(" [prog] -load applet.cap -install -list ");
+        out.println(" [prog] -deletedeps -delete 360000000001 -load applet.cap -install -list");
+        out.println(" [prog] -emv -keyset 0 -enc 404142434445464748494A4B4C4D4E4F -list");
+        out.println("");
     }
 
+
     public static void main(String[] args) throws IOException {
+        BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
+        PrintWriter out = new PrintWriter(System.out, true);
+        PrintWriter err = new PrintWriter(System.err, true);
+
+        boolean ranSuccessfully = runAsLibrary(in, out, err, args);
+
+        if (!ranSuccessfully) {
+            System.exit(1); // Give error (non-zero) exit status
+        }
+    }
+
+    /**
+     * Runs gpjNG, but unlike {@link #main(String[])} this method does not make assumptions
+     * about where the output should be written and will never call {@link System#exit(int)}.
+     *
+     * @param in   Where GPJ command input is read from.  Can be null if script is passed.
+     * @param out  Where results are written to.
+     * @param err  Where error messages are written to.  (Can use same value pass as out.)
+     * @param args Command line arguments (see usage method for details)
+     *
+     * @return true if no error occurred, otherwise false
+     */
+    public static boolean runAsLibrary(BufferedReader in, PrintWriter out, PrintWriter err, String[] args) {
 
     	final class InstallEntry {
     		AID appletAID;
-
     		AID packageAID;
-
     		int priv;
-
     		byte[] params;
     	}
 
     	boolean listApplets = false;
-
     	boolean use_jcop_emulator = false;
-    	
-    	boolean commandLine = false;
-    	
-    	String script = null;
+    	boolean isInteractive = false;
 
     	String use_jc_remote_terminal = null;
 
@@ -2190,22 +2162,22 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     	boolean deleteDeps = false;
 
     	URL capFileUrl = null;
-    	int loadSize = defaultLoadSize;
+    	int loadSize = DEFAULT_LOAD_SIZE;
     	boolean loadCompSep = false;
     	boolean loadDebug = false;
     	boolean loadParam = false;
     	boolean useHash = false;
     	int apduMode = APDU_CLR;
 
-    	Vector<InstallEntry> installs = new Vector<InstallEntry>();
+    	ArrayList<InstallEntry> installs = new ArrayList<>();
 
     	try {
     		for (int i = 0; i < args.length; i++) {
 
     			if (args[i].equals("-h") || args[i].equals("-help")
     					|| args[i].equals("--help")) {
-    				usage();
-    				System.exit(0);
+    				usage(out);
+    				return true; // exit early, but not an error
     			}
     			if (args[i].equals("-list")) {
     				listApplets = true;
@@ -2285,8 +2257,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					capFileUrl = new URL("file:"+args[i]);                        
     				}
     				try {
-    					InputStream in = capFileUrl.openStream();
-    					in.close();
+    					capFileUrl.openStream().close();
     				}catch(IOException ioe) {
     					throw new IllegalArgumentException("CAP file "
     							+ capFileUrl + " does not seem to exist.", ioe);
@@ -2353,24 +2324,24 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     				installs.add(inst);
     			} else if (args[i].equals("-jcop")) {
     				try {
-    					loadJCOPProvider();
+    					loadJCOPProvider(out);
     					use_jcop_emulator = true;
     				} catch (Exception e) {
-    					System.out
+    					out
     					.println("Unable to load jcop compatibility provider.\n"
     							+ "Please put offcard.jar and jcopio.jar "
     							+ "on the class path.\n");
-    					e.printStackTrace();
-    					System.exit(1);
+    					e.printStackTrace(err);
+    					return false;
     				}
     			} else if (args[i].equals("-t")) {
     				i++;
     				use_jc_remote_terminal = args[i];
     			} else if (args[i].equals("-s")) {
     				i++;
-    				script = args[i];
+                    in = new BufferedReader(new FileReader(args[i]));
     			} else if (args[i].equals("-cmd")) {
-    				commandLine = true;
+    				isInteractive = true;
     			} else {
     				String[] keysOpt = { "-enc", "-mac", "-kek" };
     				int index = -1;
@@ -2393,9 +2364,9 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     			}
     		}
     	} catch (Exception e) {
-    		e.printStackTrace();
-    		usage();
-    		System.exit(1);
+    		e.printStackTrace(err);
+    		usage(out);
+    		return false;
     	}
 
     	try {
@@ -2416,7 +2387,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     		else
     			tf = TerminalFactory.getInstance("JcopEmulator", null);
 
-    		// System.out.println(tf.getProvider());
+    		// out.println(tf.getProvider());
     		Card c = null;
     		CardTerminal terminal = null;
     		if(tf!=null)
@@ -2424,14 +2395,14 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     			List<CardTerminal> terminals = tf.terminals().list(CardTerminals.State.ALL);
 
                 Iterator<CardTerminal> terminalIter = terminals.iterator();
-                System.out.print("Found terminals: [");
+                out.print("Found terminals: [");
                 while (terminalIter.hasNext()) {
-                    System.out.print(terminalIter.next().getName());
+                    out.print(terminalIter.next().getName());
                     if (terminalIter.hasNext()) {
-                        System.out.print(", ");
+                        out.print(", ");
                     }
                 }
-                System.out.println("]");
+                out.println("]");
 
                 for (CardTerminal t : terminals) {
     				terminal = t;
@@ -2440,10 +2411,10 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					c = terminal.connect("*");
     				} catch (CardException e) {
     					if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_SMARTCARD")) {
-    						System.err.println("No card in reader " + terminal.getName());
+    						err.println("No card in reader " + terminal.getName());
     						continue;
     					} else
-    						e.printStackTrace();
+    						e.printStackTrace(err);
     				}
     			}
     		}
@@ -2469,171 +2440,145 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 		    				c = terminal.connect("*");
 		    			} catch (CardException e) {
 		    				if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_SMARTCARD")) {
-		    					System.err.println("No card in reader " + terminal.getName());
+		    					err.println("No card in reader " + terminal.getName());
 		    				} else
-		    					e.printStackTrace();
+		    					e.printStackTrace(err);
 		    			}
     				}
     			}
     		}
     		if(c==null)
     		{
-    			return;
+    			return false;
     		}
 
     		try {
-    			System.out.println("Found card in terminal: "
-    					+ terminal.getName());
-    			System.out.println("ATR: "
-    					+ GPUtil.byteArrayToString(c.getATR().getBytes()));
+    			out.println("Found card in terminal: " + terminal.getName());
+    			out.println("ATR: " + GPUtil.byteArrayToString(c.getATR().getBytes()));
     			CardChannel channel = c.getBasicChannel();
-    			GlobalPlatformService service = (sdAID == null) ? new GlobalPlatformService(
-    					channel)
-    			: new GlobalPlatformService(sdAID, channel);
-    					service.addAPDUListener(service);
-    					service.setKeys(keySet, keys[0], keys[1], keys[2], diver);
-    					if(deleteAID.size()>0 ||
-    							installs.size()>0 ||
-    							capFileUrl != null || 
-    							listApplets    							
-    							)
-    					{
-    						service.open();        					
-        					// TODO: make the APDU mode a parameter, properly adjust
-        					// loadSize accordingly
-        					int neededExtraSize = apduMode == APDU_CLR ? 0 :
-        						(apduMode == APDU_MAC ? 8 : 16);
-        					if (loadSize + neededExtraSize > defaultLoadSize) {
-        						loadSize -= neededExtraSize;
-        					}
-    						service.openSecureChannel(keySet, 0,
-    							GlobalPlatformService.SCP_ANY,
-    							apduMode, gemalto);
-    					}
+    			GlobalPlatformService service = (sdAID == null) ?
+                        new GlobalPlatformService(channel, out) : new GlobalPlatformService(sdAID, channel, out);
+    			service.addAPDUListener(service);
+    			service.setKeys(keySet, keys[0], keys[1], keys[2], diver);
+                if (deleteAID.size() > 0 ||
+                        installs.size() > 0 ||
+                        capFileUrl != null ||
+                        listApplets
+                        ) {
+                    service.open(out);
+                    // TODO: make the APDU mode a parameter, properly adjust
+                    // loadSize accordingly
+                    int neededExtraSize = apduMode == APDU_CLR ? 0 :
+                            (apduMode == APDU_MAC ? 8 : 16);
+                    if (loadSize + neededExtraSize > DEFAULT_LOAD_SIZE) {
+                        loadSize -= neededExtraSize;
+                    }
+                    service.openSecureChannel(keySet, 0,
+                            GlobalPlatformService.SCP_ANY,
+                            apduMode, gemalto);
+                }
 
-    					if (deleteAID.size() > 0) {
-    						for (AID aid : deleteAID) {
-    							try {
-    								service.deleteAID(aid, deleteDeps);
-    							} catch (CardException ce) {
-    								System.out.println("Could not delete AID: "
-    										+ aid);
-    								// This is when the applet is not there, ignore
-    							}
-    						}
-    					}
-    					CapFile cap = null;
+                if (deleteAID.size() > 0) {
+                    for (AID aid : deleteAID) {
+                        try {
+                            service.deleteAID(aid, deleteDeps);
+                        } catch (CardException ce) {
+                            out.println("Could not delete AID: " + aid);
+                            // This is when the applet is not there, ignore
+                        }
+                    }
+                }
+                CapFile cap = null;
 
-    					if (capFileUrl != null) {
-    						cap = new CapFile(capFileUrl.openStream());
-    						service.loadCapFile(cap, loadDebug, loadCompSep,
-    								loadSize, loadParam, useHash);
-    					}
+                if (capFileUrl != null) {
+                    InputStream capFileIn = capFileUrl.openStream(); // Note: no one ever closes this
+                    cap = new CapFile(capFileIn, out);
+                    service.loadCapFile(cap, out, loadCompSep,
+                            loadSize, loadParam, useHash);
+                }
 
-    					if (installs.size() > 0) {
-    						for (InstallEntry install : installs) {
-    							if (install.appletAID == null) {
-    								AID p = cap.getPackageAID();
-    								for (AID a : cap.getAppletAIDs()) {
-    									service.installAndMakeSelecatable(p, a,
-    											null, (byte) install.priv,
-    											install.params, null);
-    								}
-    							} else {
-    								service.installAndMakeSelecatable(
-    										install.packageAID, install.appletAID,
-    										null, (byte) install.priv,
-    										install.params, null);
+                if (installs.size() > 0) {
+                    for (InstallEntry install : installs) {
+                        if (install.appletAID == null) {
+                            AID p = cap.getPackageAID();
+                            for (AID a : cap.getAppletAIDs()) {
+                                service.installAndMakeSelectable(p, a,
+                                        null, (byte) install.priv,
+                                        install.params, null);
+                            }
+                        } else {
+                            service.installAndMakeSelectable(
+                                    install.packageAID, install.appletAID,
+                                    null, (byte) install.priv,
+                                    install.params, null);
 
-    							}
-    						}
+                        }
+                    }
 
-    					}
-    					if (listApplets) {
-    						AIDRegistry registry = service.getStatus();
-    						for (AIDRegistryEntry e : registry) {
-    							AID aid = e.getAID();
-    							int numSpaces = (15 - aid.getLength());
-    							String spaces = "";
-    							String spaces2 = "";
-    							for (int i = 0; i < numSpaces; i++) {
-    								spaces = spaces + "   ";
-    								spaces2 = spaces2 + " ";
-    							}
-    							System.out.print("AID: "
-    									+ GPUtil.byteArrayToString(aid.getBytes())
-    									+ spaces
-    									+ " "
-    									+ GPUtil.byteArrayToReadableString(aid
-    											.getBytes()) + spaces2);
-    							System.out.format(" %s LC: %d PR: 0x%02X\n", e
-    									.getKind().toShortString(), e
-    									.getLifeCycleState(), e.getPrivileges());
-    							for (AID a : e.getExecutableAIDs()) {
-    								numSpaces = (15 - a.getLength()) * 3;
-    								spaces = "";
-    								for (int i = 0; i < numSpaces; i++)
-    									spaces = spaces + " ";
-    								System.out
-    								.println("     "
-    										+ GPUtil.byteArrayToString(a
-    												.getBytes())
-    												+ spaces
-    												+ " "
-    												+ GPUtil
-    												.byteArrayToReadableString(a
-    														.getBytes()));
-    							}
-    							System.out.println();
-    						}
+                }
+                if (listApplets) {
+                    AIDRegistry registry = service.getStatus();
+                    for (AIDRegistryEntry e : registry) {
+                        AID aid = e.getAID();
+                        int numSpaces = (15 - aid.getLength());
+                        String spaces = "";
+                        String spaces2 = "";
+                        for (int i = 0; i < numSpaces; i++) {
+                            spaces = spaces + "   ";
+                            spaces2 = spaces2 + " ";
+                        }
+                        out.print("AID: "
+                                + GPUtil.byteArrayToString(aid.getBytes())
+                                + spaces
+                                + " "
+                                + GPUtil.byteArrayToReadableString(aid
+                                .getBytes()) + spaces2);
+                        out.format(" %s LC: %d PR: 0x%02X\n", e
+                                .getKind().toShortString(), e
+                                .getLifeCycleState(), e.getPrivileges());
+                        for (AID a : e.getExecutableAIDs()) {
+                            numSpaces = (15 - a.getLength()) * 3;
+                            spaces = "";
+                            for (int i = 0; i < numSpaces; i++)
+                                spaces = spaces + " ";
+                            out.println("     "
+                                    + GPUtil.byteArrayToString(a
+                                    .getBytes())
+                                    + spaces
+                                    + " "
+                                    + GPUtil
+                                    .byteArrayToReadableString(a
+                                            .getBytes()));
+                        }
+                        out.println();
+                    }
 
-    					}
-    					
-    					if(script!=null)
-    					{
-    						service.runScript(script);
-    					}
-    					else
-    					{
-	    					/*
-	    					 * shell
-	    					 */
-    						if(commandLine)
-    						{
-	    						BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
-	    						while(true)
-	    						{
-	    							System.out.print(">");
-	    							String line = "#";
-	    							while(line.startsWith("#"))
-	    							{
-	    								line = in.readLine();
-	    								if(line==null)
-	    									System.exit(0);
-	    								line = line.trim();
-	    							}
-	    						    service.commandLine(line);
-		    					}
-		    				}
-    					}
-    					
-    		} catch (Exception ce) {
-    			ce.printStackTrace();
+                }
+
+                service.runScript(in, out, isInteractive);
+
+            } catch (Exception ce) {
+    			ce.printStackTrace(err);
+                return false;
     		}
     	} catch (CardException e) {
     		if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_READERS_AVAILABLE"))
-    			System.out.println("No smart card readers found");
+    			out.println("No smart card readers found");
     		else
-    			e.printStackTrace();
-    	} catch (NoSuchAlgorithmException e) {
+    			e.printStackTrace(err);
+    	    return false;
+        } catch (NoSuchAlgorithmException e) {
     		if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_SERVICE"))
-    			System.out.println("No smart card readers found (PC/SC service not running)");
+    			out.println("No smart card readers found (PC/SC service not running)");
     		else
-    			e.printStackTrace();
-    	} catch (Exception e) {
-    		System.out.format("Terminated by escaping exception %s\n", e
-    				.getClass().getName());
-    		e.printStackTrace();
-    	}
+    			e.printStackTrace(err);
+    	    return false;
+        } catch (Exception e) {
+    		err.format("Terminated by escaping exception %s\n", e.getClass().getName());
+    		e.printStackTrace(err);
+    	    return false;
+        }
+
+        return true;
     }
 }
