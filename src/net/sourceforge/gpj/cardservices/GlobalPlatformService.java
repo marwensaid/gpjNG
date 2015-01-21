@@ -31,6 +31,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.MalformedURLException;
+import java.net.Socket;
 import java.net.URL;
 import java.security.NoSuchAlgorithmException;
 import java.security.Security;
@@ -2119,7 +2120,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
         PrintWriter out = new PrintWriter(System.out, true);
         PrintWriter err = new PrintWriter(System.err, true);
 
-        boolean ranSuccessfully = runAsLibrary(in, out, err, args);
+        boolean ranSuccessfully = runAsLibrary(in, out, err, null, args);
 
         if (!ranSuccessfully) {
             System.exit(1); // Give error (non-zero) exit status
@@ -2130,14 +2131,30 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      * Runs gpjNG, but unlike {@link #main(String[])} this method does not make assumptions
      * about where the output should be written and will never call {@link System#exit(int)}.
      *
-     * @param in   Where GPJ command input is read from.  Can be null if script is passed.
-     * @param out  Where results are written to.
-     * @param err  Where error messages are written to.  (Can use same value pass as out.)
-     * @param args Command line arguments (see usage method for details)
+     * @param in
+     *          Where GPJ command input is read from.  Can be null if script is passed.
+     * @param out
+     *          Where results are written to.
+     * @param err
+     *          Where error messages are written to.  (Can be the same value passed as out.)
+     * @param cloudTerminal
+     *          Cloud terminal for card interaction.  Use null if working with local physical cards.
+     * @param args
+     *          Command line arguments (see usage method for details)
      *
      * @return true if no error occurred, otherwise false
      */
-    public static boolean runAsLibrary(BufferedReader in, PrintWriter out, PrintWriter err, String[] args) {
+    public static boolean runAsLibrary(
+            BufferedReader in,
+            PrintWriter out,
+            PrintWriter err,
+            CloudTerminal cloudTerminal,
+            String[] args
+    ) {
+
+        if (args == null) {
+            args = new String[0];
+        }
 
     	final class InstallEntry {
     		AID appletAID;
@@ -2150,7 +2167,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     	boolean use_jcop_emulator = false;
     	boolean isInteractive = false;
 
-    	String use_jc_remote_terminal = null;
+    	String jcRemoteTerminalHost = null;
 
     	int keySet = 0;
     	byte[][] keys = { defaultEncKey, defaultMacKey, defaultKekKey };
@@ -2227,8 +2244,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					aid = GPUtil.readableStringToByteArray(args[i]);
     				}
     				if (aid == null) {
-    					throw new IllegalArgumentException("Malformed AID: "
-    							+ args[i]);
+    					throw new IllegalArgumentException("Malformed AID: " + args[i]);
     				}
     				deleteAID.add(new AID(aid));
     			} else if (args[i].equals("-deletedeps")) {
@@ -2279,8 +2295,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     						}
     						i++;
     						if (aid == null) {
-    							throw new IllegalArgumentException(
-    									"Malformed AID: " + args[i]);
+    							throw new IllegalArgumentException("Malformed AID: " + args[i]);
     						}
     						appletAID = new AID(aid);
     						current = 1;
@@ -2292,8 +2307,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     						}
     						i++;
     						if (aid == null) {
-    							throw new IllegalArgumentException(
-    									"Malformed AID: " + args[i]);
+    							throw new IllegalArgumentException("Malformed AID: " + args[i]);
     						}
     						packageAID = new AID(aid);
     						current = 2;
@@ -2327,16 +2341,15 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     					loadJCOPProvider(out);
     					use_jcop_emulator = true;
     				} catch (Exception e) {
-    					out
-    					.println("Unable to load jcop compatibility provider.\n"
-    							+ "Please put offcard.jar and jcopio.jar "
-    							+ "on the class path.\n");
+    					out.println("Unable to load jcop compatibility provider.\n"
+                                + "Please put offcard.jar and jcopio.jar "
+                                + "on the class path.\n");
     					e.printStackTrace(err);
     					return false;
     				}
     			} else if (args[i].equals("-t")) {
     				i++;
-    				use_jc_remote_terminal = args[i];
+    				jcRemoteTerminalHost = args[i];
     			} else if (args[i].equals("-s")) {
     				i++;
                     in = new BufferedReader(new FileReader(args[i]));
@@ -2380,7 +2393,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     		 */
 
     		TerminalFactory tf;
-    		if(use_jc_remote_terminal!=null)
+    		if(jcRemoteTerminalHost!=null || cloudTerminal != null)
     			tf = null;
     		else if (use_jcop_emulator == false)
     			tf = TerminalFactory.getInstance("PC/SC", null);
@@ -2388,7 +2401,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     			tf = TerminalFactory.getInstance("JcopEmulator", null);
 
     		// out.println(tf.getProvider());
-    		Card c = null;
+    		Card card = null;
     		CardTerminal terminal = null;
     		if(tf!=null)
     		{
@@ -2406,9 +2419,9 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 
                 for (CardTerminal t : terminals) {
     				terminal = t;
-    				c = null;
+    				card = null;
     				try {
-    					c = terminal.connect("*");
+    					card = terminal.connect("*");
     				} catch (CardException e) {
     					if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_SMARTCARD")) {
     						err.println("No card in reader " + terminal.getName());
@@ -2418,26 +2431,30 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     				}
     			}
     		}
-    		else
+    		else if (cloudTerminal == null)
     		{
-    			for(short i=0;i<use_jc_remote_terminal.length();i++)
+    			for(short i=0;i<jcRemoteTerminalHost.length();i++)
     			{
-    				if(use_jc_remote_terminal.substring(i,i+1).equals("|"))
+    				if(jcRemoteTerminalHost.substring(i,i+1).equals("|"))
     				{
-    					use_jc_remote_terminal = use_jc_remote_terminal.substring((i+1),(use_jc_remote_terminal.length()));
+    					jcRemoteTerminalHost = jcRemoteTerminalHost.substring((i+1),(jcRemoteTerminalHost.length()));
     					break;
     				}
     			}
-    			if(use_jc_remote_terminal!=null)
+    			if(jcRemoteTerminalHost!=null)
     			{
-    				String[] tokens = use_jc_remote_terminal.split(":");
+    				String[] tokens = jcRemoteTerminalHost.split(":");
     				if(tokens.length==2)
     				{
+                        String host = tokens[0];
     					int port = Integer.parseInt(tokens[1]);
-		    			terminal = new CloudTerminal(tokens[0],port);
-		    			c = null;
+                        Socket socket = new Socket(host, port);
+                        socket.setTcpNoDelay(true);
+                        socket.setSoTimeout(0);
+		    			terminal = new CloudTerminal(socket.getInputStream(), socket.getOutputStream());
+		    			card = null;
 		    			try {
-		    				c = terminal.connect("*");
+		    				card = terminal.connect("*");
 		    			} catch (CardException e) {
 		    				if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_SMARTCARD")) {
 		    					err.println("No card in reader " + terminal.getName());
@@ -2446,16 +2463,27 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 		    			}
     				}
     			}
-    		}
-    		if(c==null)
+    		} else {
+                terminal = cloudTerminal;
+                try {
+                    card = terminal.connect("*");
+                } catch (CardException e) {
+                    if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_SMARTCARD")) {
+                        err.println("No card in reader " + terminal.getName());
+                    } else
+                        e.printStackTrace(err);
+                }
+            }
+
+    		if(card==null)
     		{
     			return false;
     		}
 
     		try {
     			out.println("Found card in terminal: " + terminal.getName());
-    			out.println("ATR: " + GPUtil.byteArrayToString(c.getATR().getBytes()));
-    			CardChannel channel = c.getBasicChannel();
+    			out.println("ATR: " + GPUtil.byteArrayToString(card.getATR().getBytes()));
+    			CardChannel channel = card.getBasicChannel();
     			GlobalPlatformService service = (sdAID == null) ?
                         new GlobalPlatformService(channel, out) : new GlobalPlatformService(sdAID, channel, out);
     			service.addAPDUListener(service);
