@@ -3,7 +3,6 @@ package net.sourceforge.gpj.jcremoteterminal;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.Socket;
 import java.nio.ByteBuffer;
 
 import javax.smartcardio.Card;
@@ -14,27 +13,22 @@ import javax.smartcardio.ResponseAPDU;
 
 public class CloudChannel extends CardChannel {
 
-	private InputStream is = null;
-	private OutputStream os = null;
-	private Socket socket = null;
-	private CloudCard card = null;
+	private InputStream is;
+	private OutputStream os;
+	private CloudCard card;
 	
-	CloudChannel(Socket socket, InputStream is, OutputStream os, CloudCard card) throws IOException
+	CloudChannel(InputStream is, OutputStream os, CloudCard card)
 	{
 		this.is = is;
      	this.os = os;
      	this.card = card;
-     	this.socket = socket;
 	}
 	
 	@Override
 	public void close() throws CardException {
-		try {
-			socket.close();
-		} catch (IOException e) {
-			throw new CardException(e);
-		}
-	}
+        is = null;
+        os = null;
+    }
 
 	@Override
 	public Card getCard() {
@@ -46,7 +40,7 @@ public class CloudChannel extends CardChannel {
 		return 0;
 	}
 
-	private byte[] sRead() throws IOException
+    private byte[] sRead() throws IOException
 	{
 		int len = 0;
 		byte a;
@@ -99,7 +93,7 @@ public class CloudChannel extends CardChannel {
 	protected void sWrite(byte[] buffer) throws IOException
 	{
 		try{
-			byte[] tmp = null;
+			byte[] tmp;
 			if(buffer.length>0xff)
 			{
 				tmp = new byte[buffer.length+5];
@@ -127,6 +121,17 @@ public class CloudChannel extends CardChannel {
 		}		
 	}
 
+     byte[] sCardReset() throws CardException {
+        try {
+            os.write(new byte[]{0x00,0x00,0x00,0x00});
+            os.flush();
+            return sRead(); // ATR bytes
+        } catch (IOException e) {
+            throw new CardException(e);
+        }
+    }
+
+
 	@Override
 	public ResponseAPDU transmit(CommandAPDU apdu) throws CardException {
 		try {
@@ -139,25 +144,18 @@ public class CloudChannel extends CardChannel {
 	}
 
 	@Override
-	public int transmit(ByteBuffer arg0, ByteBuffer arg1) throws CardException {
-		if(arg0.hasArray())
-		{
-			byte[] apduC = arg0.array();
-			arg1.put(apduC);
-			return apduC.length;
-		}
-		
-		return 0;
-	}
+	public int transmit(ByteBuffer command, ByteBuffer response) throws CardException {
+        byte[] commandBytes = new byte[command.remaining()];
+        command.get(commandBytes);
 
-	public byte[] transmitBytes(byte[] apdu) throws CardException {
-		try {
-			sWrite(apdu);
-			byte[] apduR = sRead();
-			return apduR;
-		} catch (IOException e) {
-			throw new CardException(e);
-		}
+        try {
+            sWrite(commandBytes);
+            byte[] responseBytes = sRead();
+            response.put(responseBytes);
+            return responseBytes.length;
+        } catch (IOException e) {
+            throw new CardException("Card I/O Error", e);
+        }
 	}
 
 }

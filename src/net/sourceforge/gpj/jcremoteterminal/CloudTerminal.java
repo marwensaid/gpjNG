@@ -1,6 +1,7 @@
 package net.sourceforge.gpj.jcremoteterminal;
 
-import java.net.Socket;
+import java.io.InputStream;
+import java.io.OutputStream;
 
 import javax.smartcardio.Card;
 import javax.smartcardio.CardException;
@@ -8,23 +9,19 @@ import javax.smartcardio.CardTerminal;
 
 public class CloudTerminal extends CardTerminal {
 
-	private String ip = null;
-	private int port = 0;
-	private Socket socket = null;
-	
-	public CloudTerminal(String ip, int port)
-	{
-		this.ip = ip;
-		this.port = port;
+    private InputStream is;
+    private OutputStream os;
+
+	public CloudTerminal(InputStream is, OutputStream os)
+    {
+        this.is = is;
+        this.os = os;
 	}
 
 	@Override
-	public Card connect(String arg0) throws CardException {
+	public Card connect(String protocol) throws CardException {
 		try{
-			socket = new Socket(ip, port);
-			socket.setTcpNoDelay(true);
-            socket.setSoTimeout(0);
-            return new CloudCard(socket);
+            return new CloudCard(is, os);
 		} catch (Exception e){
 			CardException ce = new CardException("SCARD_E_NO_SMARTCARD");	
 			ce.initCause(new Throwable("SCARD_E_NO_SMARTCARD"));
@@ -39,45 +36,17 @@ public class CloudTerminal extends CardTerminal {
 
 	@Override
 	public boolean isCardPresent() throws CardException {
-		if(socket!=null && socket.isConnected())
-			return true;
-		return false;
+        return true;
 	}
 
 	@Override
-	public boolean waitForCardAbsent(long arg0) throws CardException {
-		long time = System.currentTimeMillis();
-		while((System.currentTimeMillis()-time)<arg0)
-		{
-			if(socket==null)
-				throw new CardException("");
-			if(!socket.isConnected())
-				return true;
-			try {
-				Thread.sleep(10);
-			} catch (InterruptedException e) {
-				throw new CardException("");
-			}
-		}
-		return false;
-	}
+	public boolean waitForCardAbsent(long timeout) throws CardException {
+        throw new CardException("Operation not supported");
+    }
 
 	@Override
-	public boolean waitForCardPresent(long arg0) throws CardException {
-		long time = System.currentTimeMillis();
-		while((System.currentTimeMillis()-time)<arg0)
-		{
-			if(socket==null)
-				throw new CardException("");
-			if(socket.isConnected())
-				return true;
-			try {
-				Thread.sleep(10);
-			} catch (InterruptedException e) {
-				throw new CardException("");
-			}
-		}
-		return false;
+	public boolean waitForCardPresent(long timeout) throws CardException {
+        return true;
 	}
 
 }
