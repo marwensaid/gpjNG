@@ -2114,6 +2114,30 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
         out.println("");
     }
 
+    //
+    //  Convert "[Remote|]host:port_num" into a socket
+    //
+    private static Socket createSocketFromHostPortSpec(String hostPortSpec) throws IllegalArgumentException, IOException {
+        // (?:...) Means that the parenthesis do not form a capturing group
+        String regex = "(?:Remote\\|)?([^:]+):([0-9]+)";
+        Pattern pattern = Pattern.compile(regex, Pattern.CASE_INSENSITIVE);
+        Matcher matcher = pattern.matcher(hostPortSpec);
+
+        try {
+            if (matcher.matches()) {
+                String host = matcher.group(1);
+                System.out.println("Host is: " + host);
+                Integer port = Integer.valueOf(matcher.group(2));
+                System.out.println("Port is: " + port);
+                return new Socket(host, port);
+            }
+        }
+        catch (NumberFormatException e) {
+            // handled same as non-match by regular expression
+        }
+        throw new IllegalArgumentException("Terminal spec should be [Remote|]host:port_num");
+    }
+
 
     public static void main(String[] args) throws IOException {
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
@@ -2137,7 +2161,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
      *          Where results are written to.
      * @param err
      *          Where error messages are written to.  (Can be the same value passed as out.)
-     * @param cloudTerminal
+     * @param terminal
      *          Cloud terminal for card interaction.  Use null if working with local physical cards.
      * @param args
      *          Command line arguments (see usage method for details)
@@ -2148,7 +2172,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
             BufferedReader in,
             PrintWriter out,
             PrintWriter err,
-            CloudTerminal cloudTerminal,
+            CardTerminal terminal,
             String[] args
     ) {
 
@@ -2164,10 +2188,9 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     	}
 
     	boolean listApplets = false;
-    	boolean use_jcop_emulator = false;
+    	boolean useJcopEmulator = false;
     	boolean isInteractive = false;
-
-    	String jcRemoteTerminalHost = null;
+        Socket terminalSocket = null; // used if -t flag given
 
     	int keySet = 0;
     	byte[][] keys = { defaultEncKey, defaultMacKey, defaultKekKey };
@@ -2339,7 +2362,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     			} else if (args[i].equals("-jcop")) {
     				try {
     					loadJCOPProvider(out);
-    					use_jcop_emulator = true;
+    					useJcopEmulator = true;
     				} catch (Exception e) {
     					out.println("Unable to load jcop compatibility provider.\n"
                                 + "Please put offcard.jar and jcopio.jar "
@@ -2349,7 +2372,8 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     				}
     			} else if (args[i].equals("-t")) {
     				i++;
-    				jcRemoteTerminalHost = args[i];
+                    terminalSocket = createSocketFromHostPortSpec(args[i]);
+                    terminal = new CloudTerminal(terminalSocket.getInputStream(), terminalSocket.getOutputStream());
     			} else if (args[i].equals("-s")) {
     				i++;
                     in = new BufferedReader(new FileReader(args[i]));
@@ -2392,79 +2416,43 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     		 * acrProv);
     		 */
 
-    		TerminalFactory tf;
-    		if(jcRemoteTerminalHost!=null || cloudTerminal != null)
-    			tf = null;
-    		else if (use_jcop_emulator == false)
-    			tf = TerminalFactory.getInstance("PC/SC", null);
-    		else
-    			tf = TerminalFactory.getInstance("JcopEmulator", null);
+            Card card = null;
+    		if(terminal == null) {
+                String termFactoryType = useJcopEmulator ? "JcopEmulator" : "PC/SC";
 
-    		// out.println(tf.getProvider());
-    		Card card = null;
-    		CardTerminal terminal = null;
-    		if(tf!=null)
-    		{
-    			List<CardTerminal> terminals = tf.terminals().list(CardTerminals.State.ALL);
+                TerminalFactory terminalFactory = TerminalFactory.getInstance(termFactoryType, null);
 
-                Iterator<CardTerminal> terminalIter = terminals.iterator();
-                out.print("Found terminals: [");
-                while (terminalIter.hasNext()) {
-                    out.print(terminalIter.next().getName());
-                    if (terminalIter.hasNext()) {
-                        out.print(", ");
+                if (terminalFactory != null) {
+                    List<CardTerminal> terminals = terminalFactory.terminals().list(CardTerminals.State.ALL);
+
+                    Iterator<CardTerminal> terminalIter = terminals.iterator();
+                    out.print("Found terminals: [");
+                    while (terminalIter.hasNext()) {
+                        out.print(terminalIter.next().getName());
+                        if (terminalIter.hasNext()) {
+                            out.print(", ");
+                        }
+                    }
+                    out.println("]");
+
+                    for (CardTerminal t : terminals) {
+                        terminal = t;
+                        card = null;
+                        try {
+                            card = terminal.connect("*");
+                            break;
+                        } catch (CardException e) {
+                            if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_SMARTCARD")) {
+                                err.println("No card in reader " + terminal.getName());
+                                continue;
+                            } else
+                                e.printStackTrace(err);
+                        }
                     }
                 }
-                out.println("]");
-
-                for (CardTerminal t : terminals) {
-    				terminal = t;
-    				card = null;
-    				try {
-    					card = terminal.connect("*");
-    				} catch (CardException e) {
-    					if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_SMARTCARD")) {
-    						err.println("No card in reader " + terminal.getName());
-    						continue;
-    					} else
-    						e.printStackTrace(err);
-    				}
-    			}
-    		}
-    		else if (cloudTerminal == null)
-    		{
-    			for(short i=0;i<jcRemoteTerminalHost.length();i++)
-    			{
-    				if(jcRemoteTerminalHost.substring(i,i+1).equals("|"))
-    				{
-    					jcRemoteTerminalHost = jcRemoteTerminalHost.substring((i+1),(jcRemoteTerminalHost.length()));
-    					break;
-    				}
-    			}
-    			if(jcRemoteTerminalHost!=null)
-    			{
-    				String[] tokens = jcRemoteTerminalHost.split(":");
-    				if(tokens.length==2)
-    				{
-                        String host = tokens[0];
-    					int port = Integer.parseInt(tokens[1]);
-                        Socket socket = new Socket(host, port);
-                        socket.setTcpNoDelay(true);
-                        socket.setSoTimeout(0);
-		    			terminal = new CloudTerminal(socket.getInputStream(), socket.getOutputStream());
-		    			card = null;
-		    			try {
-		    				card = terminal.connect("*");
-		    			} catch (CardException e) {
-		    				if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_SMARTCARD")) {
-		    					err.println("No card in reader " + terminal.getName());
-		    				} else
-		    					e.printStackTrace(err);
-		    			}
-    				}
-    			}
-    		} else {
-                terminal = cloudTerminal;
+            }
+    		else  // terminal provided externally or by -t host:port spec
+            {
                 try {
                     card = terminal.connect("*");
                 } catch (CardException e) {
@@ -2605,6 +2593,13 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     		err.format("Terminated by escaping exception %s\n", e.getClass().getName());
     		e.printStackTrace(err);
     	    return false;
+        }
+
+        if (terminalSocket != null) {
+            try {
+                terminalSocket.close();
+            } catch (IOException e) {
+            }
         }
 
         return true;
