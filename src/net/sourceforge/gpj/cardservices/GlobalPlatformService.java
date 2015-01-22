@@ -44,7 +44,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.Vector;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -1398,7 +1397,8 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
                 if (line.isEmpty() || line.startsWith("#"))
                     continue;
 
-                if (line.toLowerCase().equals("exit"))
+                // (?i) makes the regex case insensitive
+                if (line.matches("(?i)exit|exit-shell"))
                     break;
 
                 commandLine(line, out);
@@ -2126,9 +2126,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
         try {
             if (matcher.matches()) {
                 String host = matcher.group(1);
-                System.out.println("Host is: " + host);
                 Integer port = Integer.valueOf(matcher.group(2));
-                System.out.println("Port is: " + port);
                 return new Socket(host, port);
             }
         }
