@@ -1404,7 +1404,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
                 commandLine(line, out);
 
             } catch (IOException e) {
-                out.println("Error reading input: " + e.getMessage());
+                out.println("gpjNG error reading input: " + e.getMessage());
                 return false;
             }
         }
