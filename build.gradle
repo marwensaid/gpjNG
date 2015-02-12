@@ -9,16 +9,14 @@
 //     ./gradlew clean distTar
 //
 apply plugin: 'application'
-apply plugin: 'eclipse'
-
-tasks.eclipse.dependsOn(cleanEclipse)
 
 sourceCompatibility = '1.7'
+targetCompatibility = '1.7'
 
 mainClassName = "net.sourceforge.gpj.cardservices.GlobalPlatformService"
 
 repositories {
-    mavenCentral()
+    jcenter()
 }
 
 sourceSets {
