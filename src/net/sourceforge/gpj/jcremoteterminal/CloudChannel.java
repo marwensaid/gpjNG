@@ -13,6 +13,11 @@ import javax.smartcardio.ResponseAPDU;
 
 public class CloudChannel extends CardChannel {
 
+    private static final byte NFC_CHANNEL    = 0x01;
+    private static final byte SOCKET_CHANNEL = 0x11;
+    private static final byte SOFT_CHANNEL   = 0x21;
+    private static final byte DEVICE_CHANNEL = 0x31;
+
 	private InputStream is;
 	private OutputStream os;
 	private CloudCard card;
@@ -94,10 +99,23 @@ public class CloudChannel extends CardChannel {
 	{
 		try{
 			byte[] tmp;
-			if(buffer.length>0xff)
+
+            byte channel = NFC_CHANNEL;
+            if (card.getProtocol().equals(CloudCard.PROTOCOL_SOCKET)) {
+                channel = SOCKET_CHANNEL;
+            }
+            else if (card.getProtocol().equals(CloudCard.PROTOCOL_SOFT)) {
+                channel = SOFT_CHANNEL;
+            }
+            else if (card.getProtocol().equals(CloudCard.PROTOCOL_T0)) {
+                channel = DEVICE_CHANNEL;
+            }
+
+            if(buffer.length>0xff)
 			{
 				tmp = new byte[buffer.length+5];
-				tmp[0] = 0x41;
+				//tmp[0] = 0x41;
+				tmp[0] = (byte) (0x40 | channel);
 				tmp[1] = 0x00;
 				tmp[2] = (byte)((buffer.length&0xFF0000)>>16);
 				tmp[3] = (byte)((buffer.length&0x00FF00)>>8);
@@ -107,7 +125,8 @@ public class CloudChannel extends CardChannel {
 			else
 			{
 				tmp = new byte[buffer.length+4];
-				tmp[0] = 0x01;
+				//tmp[0] = 0x01;
+				tmp[0] = channel;
 				tmp[1] = 0x00;
 				tmp[2] = (byte)((buffer.length&0xFF00)>>8);
 				tmp[3] = (byte)(buffer.length&0x00FF);

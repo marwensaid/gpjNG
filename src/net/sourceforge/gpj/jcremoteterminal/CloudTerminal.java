@@ -18,16 +18,25 @@ public class CloudTerminal extends CardTerminal {
         this.os = os;
 	}
 
-	@Override
-	public Card connect(String protocol) throws CardException {
-		try{
-            return new CloudCard(is, os);
-		} catch (Exception e){
-			CardException ce = new CardException("SCARD_E_NO_SMARTCARD");	
-			ce.initCause(new Throwable("SCARD_E_NO_SMARTCARD"));
-			throw ce;
-		}
-	}
+    @Override
+    public Card connect(String protocol) throws CardException {
+        try {
+            if (protocol.equals(CloudCard.PROTOCOL_NFC) || 
+                protocol.equals(CloudCard.PROTOCOL_SOCKET) || 
+                protocol.equals(CloudCard.PROTOCOL_SOFT) || 
+                protocol.equals(CloudCard.PROTOCOL_T0)) {
+                return new CloudCard(is, os, protocol);
+            }
+            else {
+                return new CloudCard(is, os);
+            }
+        }
+        catch (Exception e) {
+            CardException ce = new CardException("SCARD_E_NO_SMARTCARD");
+            ce.initCause(new Throwable("SCARD_E_NO_SMARTCARD"));
+            throw ce;
+        }
+    }
 
 	@Override
 	public String getName() {

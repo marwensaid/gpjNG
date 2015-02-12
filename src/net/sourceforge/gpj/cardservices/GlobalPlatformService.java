@@ -2207,6 +2207,8 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     	boolean useHash = false;
     	int apduMode = APDU_CLR;
 
+        String cardConnectProtocol = "*";
+
     	ArrayList<InstallEntry> installs = new ArrayList<>();
 
     	try {
@@ -2377,7 +2379,11 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
                     in = new BufferedReader(new FileReader(args[i]));
     			} else if (args[i].equals("-cmd")) {
     				isInteractive = true;
-    			} else {
+                } else if (args[i].equals("-i")) {
+                    i++;
+                    cardConnectProtocol = args[i].toUpperCase();
+                }
+    			else {
     				String[] keysOpt = { "-enc", "-mac", "-kek" };
     				int index = -1;
     				for (int k = 0; k < keysOpt.length; k++) {
@@ -2437,7 +2443,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
                         terminal = t;
                         card = null;
                         try {
-                            card = terminal.connect("*");
+                            card = terminal.connect(cardConnectProtocol);
                             break;
                         } catch (CardException e) {
                             if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_SMARTCARD")) {
@@ -2452,7 +2458,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
     		else  // terminal provided externally or by -t host:port spec
             {
                 try {
-                    card = terminal.connect("*");
+                    card = terminal.connect(cardConnectProtocol);
                 } catch (CardException e) {
                     if (e.getCause().getMessage().equalsIgnoreCase("SCARD_E_NO_SMARTCARD")) {
                         err.println("No card in reader " + terminal.getName());
@@ -2468,6 +2474,7 @@ public class GlobalPlatformService implements ISO7816, APDUListener {
 
     		try {
     			out.println("Found card in terminal: " + terminal.getName());
+    			out.println("Protocol: " + card.getProtocol());
     			out.println("ATR: " + GPUtil.byteArrayToString(card.getATR().getBytes()));
     			CardChannel channel = card.getBasicChannel();
     			GlobalPlatformService service = (sdAID == null) ?

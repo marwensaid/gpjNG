@@ -10,14 +10,26 @@ import javax.smartcardio.CardException;
 
 public class CloudCard extends Card {
 
+    // Supported APDU protocols.
+    public static final String PROTOCOL_NFC    = "NFC";
+    public static final String PROTOCOL_SOCKET = "SOCKET";
+    public static final String PROTOCOL_SOFT   = "SOFT";
+    public static final String PROTOCOL_T0     = "T0";
+
     private CloudChannel channel;
 	private ATR atr;
+    private String protocol;
 
-	CloudCard(InputStream is, OutputStream os) throws CardException
-	{
+    CloudCard(InputStream is, OutputStream os) throws CardException {
+        // NFC is default protocol if not specified.
+        this(is, os, PROTOCOL_NFC);
+    }
+
+    CloudCard(InputStream is, OutputStream os, String protocol) throws CardException {
         channel = new CloudChannel(is, os, this);
         this.atr = new ATR(channel.sCardReset());
-	}
+        this.protocol = protocol;
+    }
 	
 	@Override
 	public void beginExclusive() throws CardException {
@@ -50,10 +62,10 @@ public class CloudCard extends Card {
 		return channel;
 	}
 
-	@Override
-	public String getProtocol() {
-		return null;
-	}
+    @Override
+    public String getProtocol() {
+        return protocol;
+    }
 
 	@Override
 	public CardChannel openLogicalChannel() throws CardException {
