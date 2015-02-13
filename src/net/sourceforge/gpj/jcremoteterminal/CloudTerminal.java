@@ -12,11 +12,10 @@ public class CloudTerminal extends CardTerminal {
     private InputStream is;
     private OutputStream os;
 
-	public CloudTerminal(InputStream is, OutputStream os)
-    {
+    public CloudTerminal(InputStream is, OutputStream os) {
         this.is = is;
         this.os = os;
-	}
+    }
 
     @Override
     public Card connect(String protocol) throws CardException {
@@ -38,24 +37,24 @@ public class CloudTerminal extends CardTerminal {
         }
     }
 
-	@Override
-	public String getName() {
-		return "SimplyTapp";
-	}
+    @Override
+    public String getName() {
+        return "SimplyTapp";
+    }
 
-	@Override
-	public boolean isCardPresent() throws CardException {
+    @Override
+    public boolean isCardPresent() throws CardException {
         return true;
-	}
+    }
 
-	@Override
-	public boolean waitForCardAbsent(long timeout) throws CardException {
+    @Override
+    public boolean waitForCardAbsent(long timeout) throws CardException {
         throw new CardException("Operation not supported");
     }
 
-	@Override
-	public boolean waitForCardPresent(long timeout) throws CardException {
+    @Override
+    public boolean waitForCardPresent(long timeout) throws CardException {
         return true;
-	}
+    }
 
 }

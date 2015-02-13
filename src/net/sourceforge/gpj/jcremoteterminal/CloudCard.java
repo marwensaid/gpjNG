@@ -17,7 +17,7 @@ public class CloudCard extends Card {
     public static final String PROTOCOL_T0     = "T0";
 
     private CloudChannel channel;
-	private ATR atr;
+    private ATR atr;
     private String protocol;
 
     CloudCard(InputStream is, OutputStream os) throws CardException {
@@ -28,16 +28,23 @@ public class CloudCard extends Card {
     CloudCard(InputStream is, OutputStream os, String protocol) throws CardException {
         channel = new CloudChannel(is, os, this);
         this.atr = new ATR(channel.sCardReset());
-        this.protocol = protocol;
-    }
-	
-	@Override
-	public void beginExclusive() throws CardException {
-		throw new CardException("Operation not supported");
-	}
 
-	@Override
-	public void disconnect(boolean reset)  throws CardException {
+        // NFC is default protocol if specified protocol is not known.
+        this.protocol = PROTOCOL_NFC;
+        if (PROTOCOL_SOCKET.equals(protocol) || 
+            PROTOCOL_SOFT.equals(protocol) || 
+            PROTOCOL_T0.equals(protocol)) {
+            this.protocol = protocol;
+        }
+    }
+
+    @Override
+    public void beginExclusive() throws CardException {
+        throw new CardException("Operation not supported");
+    }
+
+    @Override
+    public void disconnect(boolean reset) throws CardException {
         if (channel != null) {
             if (reset) {
                 channel.sCardReset();
@@ -47,32 +54,32 @@ public class CloudCard extends Card {
         }
     }
 
-	@Override
-	public void endExclusive() throws CardException {
-		throw new CardException("Operation not supported");
-	}
+    @Override
+    public void endExclusive() throws CardException {
+        throw new CardException("Operation not supported");
+    }
 
-	@Override
-	public ATR getATR() {
-		return atr;
-	}
+    @Override
+    public ATR getATR() {
+        return atr;
+    }
 
-	@Override
-	public CardChannel getBasicChannel() {
-		return channel;
-	}
+    @Override
+    public CardChannel getBasicChannel() {
+        return channel;
+    }
 
     @Override
     public String getProtocol() {
         return protocol;
     }
 
-	@Override
-	public CardChannel openLogicalChannel() throws CardException {
+    @Override
+    public CardChannel openLogicalChannel() throws CardException {
         return channel;
-	}
+    }
 
-	@Override
+    @Override
     public byte[] transmitControlCommand(int controlCode, byte[] command) throws CardException {
         if (controlCode != 0) {
             throw new CardException("Operation not supported");
