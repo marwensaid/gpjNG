@@ -20,10 +20,10 @@ public class CloudTerminal extends CardTerminal {
     @Override
     public Card connect(String protocol) throws CardException {
         try {
-            if (protocol.equals(CloudCard.PROTOCOL_NFC) || 
-                protocol.equals(CloudCard.PROTOCOL_SOCKET) || 
-                protocol.equals(CloudCard.PROTOCOL_SOFT) || 
-                protocol.equals(CloudCard.PROTOCOL_T0)) {
+            if (CloudCard.PROTOCOL_NFC.equals(protocol) || 
+                CloudCard.PROTOCOL_SOCKET.equals(protocol) || 
+                CloudCard.PROTOCOL_SOFT.equals(protocol) || 
+                CloudCard.PROTOCOL_T0.equals(protocol)) {
                 return new CloudCard(is, os, protocol);
             }
             else {
